@@ -8,10 +8,11 @@ FurtherLand is in development, DO NOT USE it in production environment unless yo
 Requirements
 ------------
  - Python>=3.3(FurtherLand will not work under Python2)
- - Tornado>=4.0
- - Motor>=0.4
- - Feedgen>=0.3.1
- - Pykismet3>=0.1.1
+ - aiohttp>=0.16.6
+ - motor>=0.4
+ - jinja2>=2.8
+ - feedgen>=0.3.1
+ - pykismet3>=0.1.1
  - bcrypt>=2.0.0
  - markdown>=2.6.2
  - py-gfm>=0.1.1

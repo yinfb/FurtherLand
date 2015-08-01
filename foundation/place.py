@@ -15,11 +15,10 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import asyncio
+import aiohttp
+import aiohttp.web
 
-from tornado.web import *
-from tornado.gen import *
-from tornado.escape import *
-import tornado.httpclient
 from collections import OrderedDict
 import json
 import os
@@ -32,80 +31,90 @@ import functools
 import time
 import datetime
 import feedgen.feed
+import base64
+import hmac
+import hashlib
+import urllib.parse
 
 
-def decorator_with_args(decorator_to_enhance):
-    def decorator_maker(*args, **kwargs):
-        def decorator_wrapper(func):
-            return decorator_to_enhance(func, *args, **kwargs)
-        return decorator_wrapper
-    return decorator_maker
-
-
-@decorator_with_args
-def slug_validation(func, *args, **kwargs):
-    @functools.wraps(func)
-    def wrapper(self, *func_args, **func_kwargs):
-        valid_list = args[0]
-        new_slug = []
-        for number in range(0, len(valid_list)):
-            value = self.value_validation(
-                valid_list[number], func_args[number])
-            if value is not False:
-                new_slug.append(value)
-            else:
-                raise HTTPError(404)
-        return func(self, *new_slug, **func_kwargs)
-    return wrapper
+def slug_validation(*args, **kwargs):
+    def decorator_wrapper(func):
+        @functools.wraps(func)
+        def wrapper(*func_args, **func_kwargs):
+            valid_list = args[0]
+            new_slug = []
+            for number in range(0, len(valid_list)):
+                value = self.value_validation(
+                    valid_list[number], func_args[number])
+                if value is not False:
+                    new_slug.append(value)
+                else:
+                    raise aiohttp.web.HTTPNotFound
+            return func(self, *new_slug, **func_kwargs)
+        return wrapper
+    return decorator_wrapper
 
 
 def visitor_only(func):
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
         if self.current_user:
-            self.redirect(self.next_url)
-            return
+            raise aiohttp.web.HTTPFound(self.next_url)
         return func(self, *args, **kwargs)
     return wrapper
 
 
-class PlacesOfInterest(RequestHandler):
-    current_user = None
+def master_only(func):
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if not self.current_user:
+            raise aiohttp.web.HTTPFound(self.login_url)
+        return func(self, *args, **kwargs)
+    return wrapper
 
-    @coroutine
-    def prepare(self):
+
+class PlacesOfInterest:
+    @asyncio.coroutine
+    def prepare(self, furtherland, request):
         self.start_time = time.time()
-        self.furtherland = self.settings["further_land"]
+        self.furtherland = furtherland
+        self.request = request
         self.render_list = {}
-        self.memories = self.settings["historial_records"]
-        self.memories.initialize()
-        self.current_user = yield self.get_current_user()
-        self.config = yield self.get_config()
+        self.memories = self.furtherland.historial_records
+        self.current_user = yield from self.get_current_user()
+        self.config = yield from self.get_config()
+
+        self.response_headers = []
+        self.response_cookies = []
+
+        self.body = b""
+
+        self.login_url = "/management/checkin"
 
         self.next_url = self.get_arg("next", arg_type="link", default="/")
+
         self.remote_ip = self.request.headers.get(
             "X-Forwarded-For", self.request.headers.get(
                 "X-Real-Ip", self.request.remote_ip))
         self.using_ssl = (self.request.headers.get(
             "X-Scheme", "http") == "https")
-        self.safe_land = self.settings["safe_land"]
-        if self.safe_land:
+        if self.furtherland.melody.safe_land:
             self.set_header("strict-transport-security",
                             "max-age=39420000")
 
-    @coroutine
+    @asyncio.coroutine
     def get_config(self):
         if not hasattr(self, "_config"):
             book = self.memories.select("Configs")
             book.find().length(0)
-            yield book.do()
+            yield from book.do()
             result = book.result()
             self._config = {}
             for value in result.values():
                 self._config[value["_id"]] = value["value"]
         return self._config
 
-    @coroutine
+    @asyncio.coroutine
     def get_current_user(self):
         if not hasattr(self, "_current_user"):
             user_id = self.get_scookie("user_id", arg_type="number")
@@ -114,7 +123,7 @@ class PlacesOfInterest(RequestHandler):
             if not (user_id and device_id and agent_auth):
                 self._current_user = None
             else:
-                user = yield self.get_user(_id=user_id)
+                user = yield from self.get_user(_id=user_id)
                 if self.hash((device_id + user["password"]),
                              "sha256") != agent_auth:
                     self._current_user = None
@@ -122,8 +131,149 @@ class PlacesOfInterest(RequestHandler):
                     self._current_user = user
         return (self._current_user)
 
+    def get_cookie(self, name):
+        return self.request.cookies.get(name)
+
+    def set_cookie(name, value, expires_days=None, secure=False,
+                   httponly=False):
+        if isinstance(name, str):
+            name = name.encode("utf-8")
+        elif not isinstance(name, bytes):
+            raise ValueError
+
+        if isinstance(value, str):
+            name = value.encode("utf-8")
+        elif not isinstance(value, bytes):
+            raise ValueError
+
+        if expires_days:
+            max_age = expires_days * 86400
+        else:
+            max_age = None
+        self.response_cookies.append({
+            "name": name,
+            "value": value,
+            "max_age": max_age,
+            "secure": secure,
+            "httponly": httponly
+        })
+
+    def set_header(name, value):
+        if isinstance(name, str):
+            name = name.encode("utf-8")
+        elif not isinstance(name, bytes):
+            raise ValueError
+
+        if isinstance(value, str):
+            name = value.encode("utf-8")
+        elif not isinstance(value, bytes):
+            raise ValueError
+        self.response_headers.append({
+            "name": name,
+            "value": value,
+            "method": "set"
+        })
+
+    def add_header(name, value):
+        if isinstance(name, str):
+            name = name.encode("utf-8")
+        elif not isinstance(name, bytes):
+            raise ValueError
+
+        if isinstance(value, str):
+            name = value.encode("utf-8")
+        elif not isinstance(value, bytes):
+            raise ValueError
+        self.response_headers.append({
+            "name": name,
+            "value": value,
+            "method": "add"
+        })
+
+    def set_secure_cookie(self, name, value, expires_days=30, **kwargs):
+        secret = self.surtherland.melody.secret
+
+        timestamp = str(int(time.time())).encode("utf-8")
+        if isinstance(value, str):
+            value = value.encode("utf-8")
+        elif not isinstance(value, bytes):
+            raise ValueError
+        value = base64.b64encode(value)
+
+        if isinstance(name, str):
+            name = name.encode("utf-8")
+        elif not isinstance(name, bytes):
+            raise ValueError
+
+        def format_field(s):
+            return ("%d:" % len(s)).encode("utf-8") + s
+        to_sign = b"|".join([
+            format_field(timestamp),
+            format_field(name),
+            format_field(value),
+            b""])
+
+        hash = hmac.new(secret.encode("utf-8"), digestmod=hashlib.sha256)
+        hash.update(to_sign)
+        signature = hash.hexdigest().encode("utf-8")
+
+        content = to_sign + signature
+        self.set_cookie(name, content, expires_days=expires_days, **kwargs)
+
+    def get_secure_cookie(self, name, max_age_days=31):
+        secret = self.surtherland.melody.secret
+        value = self.get_cookie(name)
+        if not value:
+            return None
+        if isinstance(value, str):
+            value = value.encode("utf-8")
+        elif not isinstance(value, bytes):
+            raise ValueError
+
+        if isinstance(name, str):
+            name = name.encode("utf-8")
+        elif not isinstance(name, bytes):
+            raise ValueError
+
+        def _consume_field(s):
+            length, _, rest = s.partition(b':')
+            n = int(length)
+            field_value = rest[:n]
+            if rest[n:n + 1] != b'|':
+                raise ValueError("malformed v2 signed value field")
+            rest = rest[n + 1:]
+            return field_value, rest
+        try:
+            timestamp, rest = _consume_field(value)
+            name_field, rest = _consume_field(rest)
+            value_field, passed_sig = _consume_field(rest)
+        except ValueError:
+            return None
+        signed_string = value[:-len(passed_sig)]
+
+        hash = hmac.new(secret.encode("utf-8"), digestmod=hashlib.sha256)
+        hash.update(signed_string)
+        expected_sig = hash.hexdigest().encode("utf-8")
+
+        if not hmac.compare_digest(passed_sig, expected_sig):
+            return None
+        if name_field != name:
+            return None
+        timestamp = int(timestamp)
+        if timestamp < time.time() - max_age_days * 86400:
+            return None
+        try:
+            return base64.b64decode(value_field)
+        except Exception:
+            return None
+
     def get_arg(self, arg, default=None, arg_type="origin"):
-        result = RequestHandler.get_argument(self, arg, None)
+        result = None
+        if self.request.method == "POST":
+            result = self.request.POST.get(arg, None)
+        if not result:
+            result = self.request.GET.get(arg, None)
+
         if isinstance(result, bytes):
             result = str(result.decode())
         else:
@@ -133,8 +283,7 @@ class PlacesOfInterest(RequestHandler):
         return self.value_validation(arg_type, result)
 
     def get_scookie(self, arg, default=None, arg_type="origin"):
-        result = RequestHandler.get_secure_cookie(
-            self, arg, None, max_age_days=181)
+        result = self.get_secure_cookie(arg, max_age_days=181)
         if isinstance(result, bytes):
             result = str(result.decode())
         else:
@@ -146,13 +295,12 @@ class PlacesOfInterest(RequestHandler):
     def set_scookie(self, arg, value="", expires_days=30, httponly=False):
         if not isinstance(value, str):
             value = str(value)
-        if self.safe_land:
+        if self.furtherland.melody.safe_land:
             secure = True
         else:
             secure = False
-        RequestHandler.set_secure_cookie(
-            self, arg, value, expires_days,
-            httponly=httponly, secure=secure)
+        self.set_secure_cookie(arg, value, expires_days,
+                               httponly=httponly, secure=secure)
 
     def value_validation(self, arg_type, value):
         if arg_type == "origin":
@@ -213,7 +361,7 @@ class PlacesOfInterest(RequestHandler):
         elif method == "md5":
             return hashlib.md5(target).hexdigest()
 
-    @coroutine
+    @asyncio.coroutine
     def get_user(self, with_privacy=True, **kwargs):
         condition = list(kwargs.keys())[0]
         value = kwargs[condition]
@@ -227,7 +375,7 @@ class PlacesOfInterest(RequestHandler):
             if value not in self._master_list[condition].keys():
                 book = self.memories.select("Masters")
                 book.find({condition: value}).length(1)
-                yield book.do()
+                yield from book.do()
                 self._master_list[condition][value] = book.result()
 
         user = {}
@@ -244,11 +392,11 @@ class PlacesOfInterest(RequestHandler):
         return "".join(random.sample(string.ascii_letters + string.digits,
                                      length))
 
-    @coroutine
+    @asyncio.coroutine
     def get_class(self):
         pass
 
-    @coroutine
+    @asyncio.coroutine
     def get_writing(self, only_published=True, **kwargs):
         book = self.memories.select("Writings")
         find_condition = {}
@@ -271,10 +419,10 @@ class PlacesOfInterest(RequestHandler):
         elif "id" in kwargs.keys():
             find_condition["_id"] = kwargs["id"]
             book.find(find_condition)
-        yield book.do()
+        yield from book.do()
         return book.result()
 
-    @coroutine
+    @asyncio.coroutine
     def get_page(self, only_published=True, **kwargs):
         book = self.memories.select("Pages")
         find_condition = {}
@@ -292,10 +440,10 @@ class PlacesOfInterest(RequestHandler):
         elif "id" in kwargs.keys():
             find_condition["_id"] = kwargs["id"]
             book.find(find_condition)
-        yield book.do()
+        yield from book.do()
         return book.result()
 
-    @coroutine
+    @asyncio.coroutine
     def get_reply(self, only_permitted=True, with_privacy=False, **kwargs):
         book = self.memories.select("Replies")
         ignore = None
@@ -313,14 +461,14 @@ class PlacesOfInterest(RequestHandler):
         elif "id" in kwargs.keys():
             find_condition["_id"] = kwargs["id"]
             book.find(find_condition, ignore)
-        yield book.do()
+        yield from book.do()
         return book.result()
 
-    @coroutine
+    @asyncio.coroutine
     def issue_id(self, working_type):
         book = self.memories.select("Counts")
         book.find_modify({"_id": working_type}, ["number"])
-        yield book.do()
+        yield from book.do()
         return int(book.result()["number"])
 
     def make_md(self, content, more=True):
@@ -329,10 +477,24 @@ class PlacesOfInterest(RequestHandler):
         return markdown.markdown(content, extensions=["gfm"])
 
     def static_url(self, path, include_host=None, nutrition=True, **kwargs):
+        if include_host:
+            url = "//" + include_host + "/"
+        else:
+            url = "/"
+        url += "spirit/"
         if nutrition:
             path = "nutrition/" + self.config["nutrition_type"] + "/" + path
-        return RequestHandler.static_url(
-            self, path, include_host=include_host, **kwargs)
+        url += path
+        return url
+
+    def write(self, text):
+        if self.body != b"":
+            raise RuntimeError
+        if isinstance(text, str):
+            text = text.encode("utf-8")
+        elif not isinstance(text, bytes):
+            raise ValueError
+        self.body = text
 
     def render(self, page, nutrition=True):
         if ("page_title" not in self.render_list.keys() and
@@ -351,27 +513,34 @@ class PlacesOfInterest(RequestHandler):
 
         if nutrition:
             page = "nutrition/" + self.config["nutrition_type"] + "/" + page
-        RequestHandler.render(self, page, **self.render_list)
+        renderer = self.furtherland.prototype.get_template(page)
+        self.write(renderer.render(self.render_list))
 
-    @coroutine
+    @asyncio.coroutine
     def get_count(self):
         result = {}
         book = self.memories.select("Writings").count()
-        yield book.do()
+        yield from book.do()
         result["writings"] = book.result()
         book = self.memories.select("Replies").count()
-        yield book.do()
+        yield from book.do()
         result["replies"] = book.result()
         book = self.memories.select("Pages").count()
-        yield book.do()
+        yield from book.do()
         result["pages"] = book.result()
         return result
 
     def escape(self, item, item_type="html"):
+        _XHTML_ESCAPE_RE = re.compile('[&<>"\']')
+        _XHTML_ESCAPE_DICT = {'&': '&amp;', '<': '&lt;', '>': '&gt;',
+                              '"': '&quot;', '\'': '&#39;'}
+
         if item_type == "html":
-            return xhtml_escape(item)
+            return _XHTML_ESCAPE_RE.sub(
+                lambda match: _XHTML_ESCAPE_DICT[match.group(0)],
+                to_basestring(item))
         elif item_type == "url":
-            return url_escape(item)
+            return urllib.parse.quote_plus(item)
         else:
             raise HTTPError(500)
 
@@ -382,41 +551,47 @@ class PlacesOfInterest(RequestHandler):
             self.render_list["sub_slug"] = ""
             self.render_list["current_content_id"] = 0
             self.render("model.htm")
-            return
-        if self.settings.get("serve_traceback") and "exc_info" in kwargs:
-            self.set_header("Content-Type", "text/plain")
-            for line in traceback.format_exception(*kwargs["exc_info"]):
-                self.write(line)
-            self.finish()
         else:
             self.render_list["status_code"] = status_code
-            self.render_list["error_message"] = self._reason
-            self.finish(
-                self.render_string(
-                    "management/error.htm",
-                    __without_database=True,
-                    **self.render_list))
+            self.render_list["error_message"] = self.furtherland.status_dict[
+                status_code]
+            self.render_list["__without_database"] = True
+            self.render("management/error.htm")
+
+    @asyncio.coroutine
+    def responding(self):
+        response = aiohttp.web.Response(self.body)
+        for cookie in self.response_cookies:
+            response.set_cookie(**cookie)
+        for header in self.response_headers:
+            if header["method"] == "set":
+                response.headers[header["name"]] = header["value"]
+            else:
+                response.headers.add(header["name"], header["value"])
+        return response
+
+    def xsrf_form_html():
+        pass
 
 
-class CentralSquare(PlacesOfInterest):
-    @coroutine
-    def get(self):
-        contents = yield self.get_writing(class_id=0)
-        for key in contents:
-            contents[key]["author"] = yield self.get_user(
-                _id=contents[key]["author"], with_privacy=False)
-            contents[key]["content"] = self.make_md(contents[key]["content"],
-                                                    more=False)
-        self.render_list["contents"] = contents
-        self.render_list["origin_title"] = "首页"
-        self.render_list["slug"] = "index"
-        self.render_list["sub_slug"] = ""
-        self.render_list["current_content_id"] = 0
-        self.render("model.htm")
+@asyncio.coroutine
+def central_square(self):
+    contents = yield from self.get_writing(class_id=0)
+    for key in contents:
+        contents[key]["author"] = yield from self.get_user(
+            _id=contents[key]["author"], with_privacy=False)
+        contents[key]["content"] = self.make_md(contents[key]["content"],
+                                                more=False)
+    self.render_list["contents"] = contents
+    self.render_list["origin_title"] = "首页"
+    self.render_list["slug"] = "index"
+    self.render_list["sub_slug"] = ""
+    self.render_list["current_content_id"] = 0
+    self.render("model.htm")
 
 
-class ConferenceHall(PlacesOfInterest):
-    @coroutine
+class ConferenceHall:
+    @asyncio.coroutine
     @slug_validation(["slug"])
     def get(self, writing_slug):
         writing = yield self.get_writing(slug=writing_slug)
@@ -433,8 +608,8 @@ class ConferenceHall(PlacesOfInterest):
         self.render("model.htm")
 
 
-class MemorialWall(PlacesOfInterest):
-    @coroutine
+class MemorialWall:
+    @asyncio.coroutine
     @slug_validation(["slug"])
     def get(self, page_slug):
         page = yield self.get_page(slug=page_slug)
@@ -451,8 +626,8 @@ class MemorialWall(PlacesOfInterest):
         self.render("model.htm")
 
 
-class NewsAnnouncement(PlacesOfInterest):
-    @coroutine
+class NewsAnnouncement:
+    @asyncio.coroutine
     def get(self):
 
         self.set_header("Content-Type", "application/xml; charset=\"utf-8\"")
@@ -494,12 +669,12 @@ class NewsAnnouncement(PlacesOfInterest):
         self.write(atomfeed)
 
 
-class HistoryLibrary(PlacesOfInterest):
+class HistoryLibrary:
     pass
 
 
-class TerminalService(PlacesOfInterest):
-    @coroutine
+class TerminalService:
+    @asyncio.coroutine
     def post(self):
         action = self.get_arg("action", default=None, arg_type="link")
         if hasattr(self, action):
@@ -507,7 +682,7 @@ class TerminalService(PlacesOfInterest):
         else:
             raise HTTPError(500)
 
-    @coroutine
+    @asyncio.coroutine
     def load_index(self):
         contents = yield self.get_writing(class_id=0)
         for key in contents:
@@ -517,7 +692,7 @@ class TerminalService(PlacesOfInterest):
                 "<!--more-->")[0]
         self.finish(json.dumps(list(contents.values())))
 
-    @coroutine
+    @asyncio.coroutine
     def load_writing(self):
         writing_slug = self.get_arg("slug", arg_type="slug")
         writing = yield self.get_writing(slug=writing_slug)
@@ -532,7 +707,7 @@ class TerminalService(PlacesOfInterest):
         writing["success"] = True
         self.finish(json.dumps(writing))
 
-    @coroutine
+    @asyncio.coroutine
     def load_page(self):
         page_slug = self.get_arg("slug", arg_type="slug")
         page = yield self.get_page(slug=page_slug)
@@ -547,7 +722,7 @@ class TerminalService(PlacesOfInterest):
         page["success"] = True
         self.finish(json.dumps(page))
 
-    @coroutine
+    @asyncio.coroutine
     def load_reply(self):
         writing_id = self.get_arg("writing", arg_type="number")
         reply_id = self.get_arg("reply", arg_type="number")
@@ -560,7 +735,7 @@ class TerminalService(PlacesOfInterest):
             raise HTTPError(500)
         self.finish(json.dumps(result))
 
-    @coroutine
+    @asyncio.coroutine
     def new_reply(self):
         writing_id = self.get_arg("writing", arg_type="number")
         reply_id = self.get_arg("reply", arg_type="number")
@@ -616,8 +791,8 @@ class TerminalService(PlacesOfInterest):
         self.finish(json.dumps(result))
 
 
-class IllustratePlace(PlacesOfInterest):
-    @coroutine
+class IllustratePlace:
+    @asyncio.coroutine
     @slug_validation(["hash"])
     def get(self, slug):
         size = self.get_arg("s", default=80, arg_type="number")
@@ -704,7 +879,7 @@ class IllustratePlace(PlacesOfInterest):
         self.finish(avatar)
 
 
-class LostAndFoundPlace(PlacesOfInterest):
+class LostAndFoundPlace:
     def get(self, *args, **kwargs):
         raise HTTPError(404)
 

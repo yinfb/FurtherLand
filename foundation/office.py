@@ -25,7 +25,7 @@ import json
 import bcrypt
 
 
-class ManagementOffice(PlacesOfInterest):
+class ManagementOffice:
     def management_url(self, path, include_host=None, **kwargs):
         path = "management/" + path
         return RequestHandler.static_url(
@@ -37,7 +37,7 @@ class ManagementOffice(PlacesOfInterest):
         self.render(page, nutrition=False)
 
 
-class CheckinOffice(ManagementOffice):
+class CheckinOffice:
     @coroutine
     @visitor_only
     def get(self):
@@ -108,7 +108,7 @@ class CheckinOffice(ManagementOffice):
             self.redirect(self.next_url)
 
 
-class CheckoutOffice(ManagementOffice):
+class CheckoutOffice:
     @authenticated
     def get(self):
         self.clear_cookie("user_id")
@@ -117,7 +117,7 @@ class CheckoutOffice(ManagementOffice):
         self.redirect(self.next_url)
 
 
-class MainOffice(ManagementOffice):
+class MainOffice:
     @coroutine
     @authenticated
     def get(self, slug, sub_slug=""):
@@ -130,7 +130,7 @@ class MainOffice(ManagementOffice):
         self.management_render("office.htm")
 
 
-class ActionOffice(ManagementOffice):
+class ActionOffice:
     @coroutine
     @authenticated
     def post(self):

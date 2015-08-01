@@ -15,11 +15,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-
-from tornado.gen import *
+import asyncio
 from collections import OrderedDict
-import motor
-import tornado.web
+import motor.motor_asyncio.AsyncIOMotorClient
 
 
 class Element:
@@ -95,7 +93,7 @@ class Element:
             self._action.skip(skip)
             self._skiped = True
         else:
-            raise Exception
+            raise aiohttp.web.HTTPInternalServerError
         return self
 
     def length(self, length=1, force_dict=False):
@@ -105,7 +103,7 @@ class Element:
             self._force_dict = force_dict
             self._lengthed = True
         else:
-            raise Exception
+            raise aiohttp.web.HTTPInternalServerError
         return self
 
     def sort(self, sort):
@@ -120,29 +118,29 @@ class Element:
             self._action.sort(sort_condition)
             self._sorted = True
         else:
-            raise Exception
+            raise aiohttp.web.HTTPInternalServerError
         return self
 
-    @coroutine
+    @asyncio.coroutine
     def do(self):
         if (not self._result_ready) and self._action_ready:
             if self._use_cursor:
                 if self._length != 0:
                     self._action.limit(self._length)
                 self._result = OrderedDict()
-                while (yield self._action.fetch_next):
+                while (yield from self._action.fetch_next):
                     item = self._action.next_object()
                     self._result[item[self._dict_key]] = item
                 if (len(self._result) != 0 and
                    self._length == 1 and (not self._force_dict)):
                     self._result = self._result[list(self._result.keys())[0]]
             else:
-                self._result = yield self._action
+                self._result = yield from self._action
             self._result_ready = True
             self._action_ready = False
             self._allow_filter = False
         else:
-            raise Exception
+            raise aiohttp.web.HTTPInternalServerError
         return self
 
     def result(self):
@@ -150,7 +148,7 @@ class Element:
             self._result_ready = False
             return self._result
         else:
-            raise Exception
+            raise aiohttp.web.HTTPInternalServerError
 
     def reset(self):
         self._length = 1
@@ -177,7 +175,7 @@ class Records:
         if self.library["auth"]:
             credentials = (
                self.library["user"] + ":" + self.library["passwd"] + "@")
-        self.connection = motor.MotorClient(
+        self.connection = motor.motor_asyncio.AsyncIOMotorClient(
             "mongodb://" + credentials + self.library["host"] + ":" +
             str(self.library["port"]) +
             "/" + self.library["database"])
@@ -187,7 +185,7 @@ class Records:
 
     def select(self, collection):
         if not self._initialized:
-            raise tornado.web.HTTPError(500)
+            raise aiohttp.web.HTTPInternalServerError
         _current_collection = self.database[
             self.library["prefix"] + collection]
         return Element(collection=_current_collection, dict_key="_id")
