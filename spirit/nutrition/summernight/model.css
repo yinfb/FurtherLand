@@ -365,6 +365,8 @@ footer{
     box-sizing: border-box;
     padding-left: 20px;
     padding-right: 20px;
+    position: absolute;
+    bottom: 0px;
 }
 body.small footer{
     display: block;
