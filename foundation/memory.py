@@ -46,20 +46,19 @@ class Element:
 
     def erase(self, condition):
         self.reset()
-        self._action = self._current_collection.remove(condition)
+        self._action = self._current_collection.find_one_and_delete(condition)
         self._action_ready = True
         return self
 
     def add(self, content):
         self.reset()
-        self._action = self._current_collection.insert(content)
+        self._action = self._current_collection.insert_one(content)
         self._action_ready = True
         return self
 
     def set(self, condition, content):
         self.reset()
-        self._action = self._current_collection.update(condition,
-                                                       {"$set": content})
+        self._action = self._current_collection.find_one_and_update(condition,update={"$set": content})
         self._action_ready = True
         return self
 
@@ -78,8 +77,7 @@ class Element:
         elif method == "set":
             update_condition = update
             update = {"$set": update_condition}
-        self._action = self._current_collection.find_and_modify(
-            query=condition, update=update, new=new)
+        self._action = self._current_collection.find_one_and_update(filter=condition, update=update)
         self._action_ready = True
         return self
 
@@ -150,6 +148,48 @@ class Element:
             raise Exception
         return self
 
+    @coroutine
+    def doConfigLoad(self):
+        if (not self._result_ready) and self._action_ready:
+            if self._use_cursor:
+                if self._length != 0:
+                    self._action.limit(self._length)
+                self._result = OrderedDict()
+                while (yield self._action.fetch_next):
+                    item = self._action.next_object()
+                    self._result[item[self._dict_key]] = item["value"]
+                if (len(self._result) != 0 and
+                   self._length == 1 and (not self._force_dict)):
+                    self._result = self._result[list(self._result.keys())[0]]
+            else:
+                self._result = yield self._action
+            self._result_ready = True
+            self._action_ready = False
+            self._allow_filter = False
+        else:
+            raise Exception
+        return self
+
+    @coroutine
+    def doCheckin(self):
+        if (not self._result_ready) and self._action_ready:
+            if self._use_cursor:
+                if self._length != 0:
+                    self._action.limit(self._length)
+                self._result = OrderedDict()
+                while (yield self._action.fetch_next):
+                    item = self._action.next_object()
+                    for key in item.keys():
+                        self._result[key] = item[key]
+            else:
+                self._result = yield self._action
+            self._result_ready = True
+            self._action_ready = False
+            self._allow_filter = False
+        else:
+            raise Exception
+        return self
+
     def result(self):
         if self._result_ready:
             self._result_ready = False
@@ -182,19 +222,14 @@ class Records:
         if self.library["auth"]:
             credentials = (
                self.library["user"] + ":" + self.library["passwd"] + "@")
-        self.connection = motor.MotorClient(
-            "mongodb://" + credentials + self.library["host"] + ":" +
-            str(self.library["port"]) +
-            "/" + self.library["database"])
-        self.database = self.connection[
-            self.library["database"]]
+        self.connection = motor.MotorClient("mongodb://" + credentials + self.library["host"] + ":" +str(self.library["port"]))
+        self.database = self.connection[self.library["database"]]
         self._initialized = True
 
     def select(self, collection):
         if not self._initialized:
             raise tornado.web.HTTPError(500)
-        _current_collection = self.database[
-            self.library["prefix"] + collection]
+        _current_collection = self.database[self.library["prefix"] + collection]
         return Element(collection=_current_collection, dict_key="_id")
 
     def __del__(self):

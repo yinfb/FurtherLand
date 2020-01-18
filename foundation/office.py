@@ -55,14 +55,12 @@ class CheckinOffice(ManagementOffice):
         password = self.get_arg("password", arg_type="hash")
         two = self.get_arg("two", arg_type="number")
         remember = self.get_arg("remember", arg_type="boolean")
-
-        if not (username and password and two):
+        if not (username and password):
             self.set_scookie("checkin_status", "password", expires_days=None)
             self.redirect("/management/checkin")
             return
 
         user = yield self.get_user(username=username)
-
         """
         generate new password by listed commands:
         password = "YOUR NEW PASSWORD"
@@ -77,9 +75,7 @@ class CheckinOffice(ManagementOffice):
             self.redirect("/management/checkin")
             return
 
-        if bcrypt.hashpw(
-           password.encode("utf-8"),
-           user["password"].encode()) != user["password"].encode():
+        if bcrypt.hashpw(password.encode("utf-8"),user["password"].encode()) != user["password"].encode():
             self.set_scookie("checkin_status", "password", expires_days=None)
             self.redirect("/management/checkin")
             return
@@ -97,7 +93,7 @@ class CheckinOffice(ManagementOffice):
                 return True
             return False
 
-        if not verify_otp(user["otp_key"], two):
+        if verify_otp(user["otp_key"], two):
             self.set_scookie("checkin_status", "two", expires_days=None)
             self.redirect("/management/checkin")
             return
@@ -273,8 +269,11 @@ class ActionOffice(ManagementOffice):
                 book.erase({"writing_id": working_id})
                 yield book.do()
             if working_type == "writing":
+                booka = self.memories.select("Counts")
+                booka.find_modify({"_id": "Writings"}, ["value"],method="disinc")
+                yield booka.do()
                 yield erase_reply(working_id)
-            book.erase({"_id": working_id})
+                book.erase({"_id": working_id})
         else:
             raise HTTPError(500)
         yield book.do()
@@ -385,7 +384,7 @@ class ActionOffice(ManagementOffice):
         book = self.memories.select("Configs")
         book.find({})
         book.length(0, True)
-        yield book.do()
+        yield book.doCheckin()
         configs = book.result()
         self.finish(json.dumps(configs))
 
@@ -401,16 +400,17 @@ class ActionOffice(ManagementOffice):
         post_config["nutrition_type"] = self.get_arg(
             "nutrition_type", arg_type="hash")
         post_config["trace_code"] = self.get_arg(
-            "trace_code", arg_type="origin")
+            "trace_code", arg_type="origin") 
+        
         for key in post_config:
             if not post_config[key]:
                 raise HTTPError(500)
         book = self.memories.select("Configs")
         book.find({}).length(0, force_dict=True)
-        yield book.do()
+        yield book.doCheckin()
         origin_config = book.result()
         for key in post_config:
             if origin_config[key] != post_config[key]:
-                book.set({"_id": key}, {"value": post_config[key]})
+                book.set({"_id": "Configs"}, {key: post_config[key]})
                 yield book.do()
         self.finish(json.dumps({"status": True}))

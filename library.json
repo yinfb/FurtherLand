@@ -121,7 +121,7 @@
                     "type": "prepared",
                     "content": "控制台"
                 }
-            },
+            }
         ]
     },
     {
@@ -210,7 +210,7 @@
                     "type": "prepared",
                     "content": 0
                 }
-            },
+            }
         ]
     },
     {
@@ -253,7 +253,7 @@
                     "type": "required",
                     "content": ""
                 }
-            },
+            }
         ]
     },
     {

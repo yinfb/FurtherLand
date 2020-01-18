@@ -32,6 +32,7 @@ import functools
 import time
 import datetime
 import feedgen.feed
+from mdx_gfm import GithubFlavoredMarkdownExtension
 
 
 def decorator_with_args(decorator_to_enhance):
@@ -98,11 +99,11 @@ class PlacesOfInterest(RequestHandler):
         if not hasattr(self, "_config"):
             book = self.memories.select("Configs")
             book.find().length(0)
-            yield book.do()
+            yield book.doCheckin()
             result = book.result()
             self._config = {}
-            for value in result.values():
-                self._config[value["_id"]] = value["value"]
+            for key in result.keys():
+                self._config[key] = result[key]
         return self._config
 
     @coroutine
@@ -227,12 +228,11 @@ class PlacesOfInterest(RequestHandler):
             if value not in self._master_list[condition].keys():
                 book = self.memories.select("Masters")
                 book.find({condition: value}).length(1)
-                yield book.do()
+                yield book.doCheckin()
                 self._master_list[condition][value] = book.result()
-
         user = {}
         user.update(self._master_list[condition][value])
-
+    
         if not with_privacy:
             del user["password"]
             del user["otp_key"]
@@ -319,14 +319,14 @@ class PlacesOfInterest(RequestHandler):
     @coroutine
     def issue_id(self, working_type):
         book = self.memories.select("Counts")
-        book.find_modify({"_id": working_type}, ["number"])
+        book.find_modify({"_id": working_type}, ["value"])
         yield book.do()
-        return int(book.result()["number"])
+        return int(book.result()["value"])
 
     def make_md(self, content, more=True):
         if not more:
             content = content.split("<!--more-->")[0]
-        return markdown.markdown(content, extensions=["gfm"])
+        return markdown.markdown(content,extensions=[GithubFlavoredMarkdownExtension()])
 
     def static_url(self, path, include_host=None, nutrition=True, **kwargs):
         if nutrition:
@@ -355,28 +355,11 @@ class PlacesOfInterest(RequestHandler):
 
     @coroutine
     def get_count(self):
-        result = {}
-        book = self.memories.select("Writings").count()
-        yield book.do()
-        result["writings"] = book.result()
-        book.count(do_find=True, condition={"publish": False})
-        yield book.do()
-        result["writings_draft"] = book.result()
-
-        book = self.memories.select("Pages").count()
-        yield book.do()
-        result["pages"] = book.result()
-        book.count(do_find=True, condition={"publish": False})
-        yield book.do()
-        result["pages_draft"] = book.result()
-
-        book = self.memories.select("Replies").count()
-        yield book.do()
-        result["replies"] = book.result()
-        book.count(do_find=True, condition={"permit": False})
-        yield book.do()
-        result["replies_waiting_permit"] = book.result()
-
+        book = self.memories.select("Counts")
+        book.find({})
+        book.length(0, True)
+        yield book.doConfigLoad()
+        result= book.result()
         return result
 
     def escape(self, item, item_type="html"):
@@ -498,9 +481,7 @@ class NewsAnnouncement(PlacesOfInterest):
                 datetime.datetime.fromtimestamp(content[key]["time"]).replace(
                     tzinfo=datetime.timezone.utc))
 
-            fg.updated(datetime.datetime.fromtimestamp(
-                update_time).replace(
-                    tzinfo=datetime.timezone.utc))
+            fg.updated(datetime.datetime.fromtimestamp(update_time).replace( tzinfo=datetime.timezone.utc))
 
         atomfeed = fg.atom_str(pretty=True)
         self.write(atomfeed)

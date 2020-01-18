@@ -1,0 +1,17 @@
+Preconfig = [
+        {
+            "_id":"Configs"
+            "site_name": "FurtherLand"
+            "site_url": "",
+            "nutrition_type":"summernight",
+            "site_description": "Nobody knows the Future, Why not fight up?",
+            "site_keywords": "FurtherLand, Python",
+            "trace_code": "<script></script>",
+            "configuration_name": "设置",
+            "crda_name": "管理",
+            "lobby_name":"首页",
+            "public_name":"文件上传",
+            "working_name":"创作",
+            "office_name":"控制台"
+        }
+    ]

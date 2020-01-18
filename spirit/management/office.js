@@ -520,29 +520,29 @@ function loadLobbyData(callback) {
         }
         throw new Error(resp.statusText);
     }).then(function (json) {
-        objects["main > .lobby .writing-num .content"].innerHTML = json.writings;
-        objects["main > .lobby .page-num .content"].innerHTML = json.pages;
-        objects["main > .lobby .reply-num .content"].innerHTML = json.replies;
+        objects["main > .lobby .writing-num .content"].innerHTML = json.Writings;
+        objects["main > .lobby .page-num .content"].innerHTML = json.Pages;
+        objects["main > .lobby .reply-num .content"].innerHTML = json.Replies;
 
-        if (json.writings_draft === 0) {
+        if (json.Writings_draft === 0) {
             objects["main > .lobby .writing-num .tips-list .item"].style.display = "none";
         } else {
             objects["main > .lobby .writing-num .tips-list .item"].style.display = "block";
-            objects["main > .lobby .writing-num .tips-list .number"].innerHTML = json.writings_draft;
+            objects["main > .lobby .writing-num .tips-list .number"].innerHTML = json.Writings_draft;
         }
 
-        if (json.pages_draft === 0) {
+        if (json.Pages_draft === 0) {
             objects["main > .lobby .page-num .tips-list .item"].style.display = "none";
         } else {
             objects["main > .lobby .page-num .tips-list .item"].style.display = "block";
-            objects["main > .lobby .page-num .tips-list .number"].innerHTML = json.pages_draft;
+            objects["main > .lobby .page-num .tips-list .number"].innerHTML = json.Pages_draft;
         }
 
-        if (json.replies_waiting_permit === 0) {
+        if (json.Replies_waiting_permit === 0) {
             objects["main > .lobby .reply-num .tips-list .item"].style.display = "none";
         } else {
             objects["main > .lobby .reply-num .tips-list .item"].style.display = "block";
-            objects["main > .lobby .reply-num .tips-list .number"].innerHTML = json.replies_waiting_permit;
+            objects["main > .lobby .reply-num .tips-list .number"].innerHTML = json.Replies_waiting_permit;
         }
         if (callback) {
             callback();
@@ -1484,11 +1484,12 @@ function loadConfigurationData(callback) {
         }
         throw new Error(resp.statusText);
     }).then(function (json) {
-        Array.prototype.forEach.call(
-            _All("main > .configuration .config-value"), function (element) {
-                element.value = json[element.getAttribute("config_name")].value;
-            }
-        );
+        document.getElementById("configuration-config-value-site_name").value = json.site_name;
+        document.getElementById("configuration-config-value-site_description").value = json.site_description;
+        document.getElementById("configuration-config-value-site_keywords").value = json.site_keywords; 
+        document.getElementById("configuration-config-value-site_url").value = json.site_url;
+        document.getElementById("configuration-config-value-nutrition_type").value = json.nutrition_type;
+        document.getElementsByClassName("config-value")[5].value = json.trace_code;
         Array.prototype.forEach.call(
             _All("main > .configuration .config-value-back"), function (element) {
                 element.classList.add("is-dirty");

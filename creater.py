@@ -15,17 +15,13 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-try:
-    import sys
-    if sys.version_info.major < 3:
-        raise
-    if sys.version_info.minor < 3:
-        raise
-except:
+import sys
+if sys.version_info.major < 3:
     print("FurtherLand needs as least Python3.3 or higher.")
     print("Please upgrade your Python version.")
     exit(1)
-
+# use the to install all moudle
+# python -m pip install tornado motor misaka mako pycurl feedgen  markdown pyotp bcrypt  py-gfm
 try:
     import tornado
 except:
@@ -63,7 +59,30 @@ except:
     exit(1)
 
 try:
-    from . import melody
+    import markdown
+except:
+    print("Please install markdown Firstly")
+    exit(1)
+
+try:
+    import pyotp
+except:
+    print("Please install pyotp Firstly")
+    exit(1)
+
+try:
+    import bcrypt
+except:
+    print("Please install bcrypt Firstly")
+    exit(1)
+try:
+    import mdx_gfm
+except:
+    print("Please install tornado gfm")
+    exit(1)
+
+try:    
+    import melody
     secret = melody.secret
     base = melody.base
     safeland = melody.safeland
@@ -72,7 +91,93 @@ try:
     listen_port = melody.listen_port
     library = melody.library
     import pymongo
-
+    credentials = ""
+    if (library["auth"]):
+        credentials=(library["user"]+ ":" + library["passwd"] + "@")
+    DBClient= pymongo.MongoClient("mongodb://" + credentials + library["host"] + ":" +str(library["port"]) +"/")
+    DBAdmin = DBClient[library["database"]]
+    Preconfig = [
+        {"_id":"Configs","site_name":"FurtherLand","site_url":"","nutrition_type":"summernight","site_description":"Nobody knows the Future, Why not fight up?","site_keywords":"FurtherLand, Python","trace_code":"<script></script>","configuration_name":"设置","crda_name":"管理","lobby_name":"首页","public_name":"文件上传","working_name":"创作","office_name":"控制台"}
+    ]
+    Configpreset=DBAdmin["Configs"]
+    res = Configpreset.insert_many(Preconfig)
+    preCounts = [
+            {
+                "_id": "Classes",
+                "value": 0
+            },
+            {
+                "_id": "Masters",
+                "value": 1
+            },
+            {
+                "_id": "Pages",
+                "value": 0
+            },
+            {
+                "_id": "Publics",
+                "value": 0
+            },
+            {
+                "_id": "Replies",
+                "value": 0
+            },
+            {
+                "_id": "Tags",
+                "value": 0
+            },
+            {
+                "_id": "Visitors",
+                "value": 0
+            },
+            {
+                "_id": "Writings",
+                "value": 0
+            },
+            {
+                "_id": "Writings_draft",
+                "value": 0
+            },
+            {
+                "_id": "Pages_draft",
+                "value": 0
+            },
+            {
+                "_id": "Replies_waiting_permit",
+                "value": 0
+            }
+        ]
+    Countspreset=DBAdmin["Counts"]
+    res=Countspreset.insert_many(preCounts)
+    preMasters = [
+            {
+                "_id": 1,
+                "role":"master"
+                ,
+                "username":"admin" 
+                #generate new password by listed commands:
+                #password = "YOUR NEW PASSWORD"
+                #bcrypt.hashpw(
+                #hashlib.sha256(password.encode()
+                #           ).hexdigest().encode(), bcrypt.gensalt())
+                ,
+                "email":"1@1.com"
+                ,
+                "password":"$2b$12$bQOD5kUzYTZYWRjDPgeVSeWxZlNuzOSlHXb3yjTW4pDclHyAxdNcm" #123456!
+                ,
+                "otp_key":""
+                ,
+                "last_login": 0
+                ,
+                "created": 0
+                ,
+                "homepage":"1.com"
+                ,
+                "emailmd5":"11111"
+            }
+        ]
+    Masterspreset=DBAdmin["Masters"]
+    res=Masterspreset.insert_many(preMasters)
 except:
-    print("You should Configure melody.py correctly firstly.")
+    print("Please Check Melody!")
     exit(1)
