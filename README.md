@@ -21,16 +21,16 @@ All listed Requirements(Except Python3.3) are able to be installed by pip.
 
 Usage
 ------------
- . Config Database and other things in melody.py
- . Run creater.py to Create the land(Also you can config something of account here)
- . then run blessing.py
- . it should work,visit it
+1. Config Database and other things in melody.py
+2. Run creater.py to Create the land(Also you can config something of account here)
+3. then run blessing.py
+4. it should work,visit it
  
  TODO
 ------------
- . Many enhancements
- . Code optimization
- . Page enhancement
+1. Many enhancements
+2. Code optimization
+3. Page enhancement
 
 License
 -------
