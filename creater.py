@@ -21,7 +21,7 @@ if sys.version_info.major < 3:
     print("Please upgrade your Python version.")
     exit(1)
 # use the to install all moudle
-# python -m pip install tornado motor misaka mako pycurl feedgen  markdown pyotp bcrypt  py-gfm
+# python -m pip install tornado motor misaka mako pycurl feedgen  markdown pyotp bcrypt py-gfm
 try:
     import tornado
 except:
@@ -78,7 +78,7 @@ except:
 try:
     import mdx_gfm
 except:
-    print("Please install tornado gfm")
+    print("Please install py-gfm")
     exit(1)
 
 try:    

@@ -19,6 +19,19 @@ Requirements
 
 All listed Requirements(Except Python3.3) are able to be installed by pip.
 
+Usage
+------------
+. Config Database and other things in melody.py
+. Run creater.py to Create the land(Also you can config something of account here)
+. then run blessing.py
+. it should work,visit it
+ 
+ TODO
+------------
+. Many enhancements
+. Code optimization
+. Page enhancement
+
 License
 -------
    Copyright 2015 Futur Solo
